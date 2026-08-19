@@ -1,0 +1,31 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 1,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "title": "Throughput (Requests / sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "rate(flowforge_http_requests_total[1m])", "legendFormat": "{{endpoint}}" }
+      ]
+    },
+    {
+      "title": "API Request Latency (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(flowforge_http_request_duration_seconds_bucket[1m]))", "legendFormat": "p95" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["flowforge", "distributed-systems"],
+  "title": "FlowForge Distributed Operations Overview",
+  "version": 1
+}

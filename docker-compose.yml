@@ -1,0 +1,148 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: flowforge-postgres
+    environment:
+      POSTGRES_USER: flowforge
+      POSTGRES_PASSWORD: flowforge_secret
+      POSTGRES_DB: flowforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: flowforge-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: flowforge-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: flowforge
+      RABBITMQ_DEFAULT_PASS: flowforge_secret
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: flowforge-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flowforge:flowforge_secret@postgres:5432/flowforge
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://flowforge:flowforge_secret@rabbitmq:5672/
+      USE_EMBEDDED_BROKER: "false"
+      ENABLE_DEMO_MODE: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: flowforge-worker-1
+    command: python worker/app/worker_daemon.py worker-pool-01
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flowforge:flowforge_secret@postgres:5432/flowforge
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://flowforge:flowforge_secret@rabbitmq:5672/
+      USE_EMBEDDED_BROKER: "false"
+    depends_on:
+      backend:
+        condition: service_started
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: flowforge-worker-2
+    command: python worker/app/worker_daemon.py worker-pool-02
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flowforge:flowforge_secret@postgres:5432/flowforge
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://flowforge:flowforge_secret@rabbitmq:5672/
+      USE_EMBEDDED_BROKER: "false"
+    depends_on:
+      backend:
+        condition: service_started
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: scheduler/Dockerfile
+    container_name: flowforge-scheduler
+    environment:
+      DATABASE_URL: postgresql+asyncpg://flowforge:flowforge_secret@postgres:5432/flowforge
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://flowforge:flowforge_secret@rabbitmq:5672/
+      USE_EMBEDDED_BROKER: "false"
+    depends_on:
+      backend:
+        condition: service_started
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: flowforge-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    depends_on:
+      - backend
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: flowforge-prometheus
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: flowforge-grafana
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:

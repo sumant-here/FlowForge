@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flowforge-config
+  namespace: flowforge
+data:
+  PROJECT_NAME: "FlowForge"
+  USE_EMBEDDED_BROKER: "false"
+  HEARTBEAT_INTERVAL_SECONDS: "5"
+  HEARTBEAT_TIMEOUT_SECONDS: "15"
+  WORKER_CONCURRENCY: "4"

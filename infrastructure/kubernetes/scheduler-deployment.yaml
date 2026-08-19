@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flowforge-scheduler
+  namespace: flowforge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flowforge-scheduler
+  template:
+    metadata:
+      labels:
+        app: flowforge-scheduler
+    spec:
+      containers:
+        - name: scheduler
+          image: flowforge/scheduler:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: flowforge-config
+            - secretRef:
+                name: flowforge-secrets
