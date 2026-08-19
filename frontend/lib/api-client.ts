@@ -2,10 +2,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // Client-side in-memory & localStorage store for live demo simulation mode
 const getMockData = () => {
-  if (typeof window === "undefined") return { jobs: [], workers: [], workflows: [] };
+  if (typeof window === "undefined") {
+    return { jobs: [], workers: [], workflows: [], schedules: [], dlq: [] };
+  }
   const stored = localStorage.getItem("flowforge_mock_state");
   if (stored) {
-    try { return JSON.parse(stored); } catch (e) {}
+    try {
+      const parsed = JSON.parse(stored);
+      if (parsed && Array.isArray(parsed.jobs)) return parsed;
+    } catch (e) {}
   }
   const initial = {
     jobs: [
@@ -128,7 +133,16 @@ export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("flowforge_token") : null;
+  const isBrowser = typeof window !== "undefined";
+  const isHttps = isBrowser && window.location.protocol === "https:";
+  const isLocalBackend = API_BASE.includes("localhost") || API_BASE.includes("127.0.0.1");
+
+  // On HTTPS static hosting (e.g. GitHub Pages) without an HTTPS backend, directly use simulated execution engine
+  if (isHttps && isLocalBackend) {
+    return handleSimulatedRequest<T>(endpoint, options);
+  }
+
+  const token = isBrowser ? localStorage.getItem("flowforge_token") : null;
   const headers = new Headers(options.headers || {});
   headers.set("Content-Type", "application/json");
   if (token) {
@@ -137,7 +151,7 @@ export async function apiRequest<T>(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timeoutId = setTimeout(() => controller.abort(), 1500);
 
     const response = await fetch(`${API_BASE}/api/v1${endpoint}`, {
       ...options,
@@ -195,26 +209,30 @@ function handleSimulatedRequest<T>(endpoint: string, options: RequestInit = {}):
   // 2. JOBS LIST / CREATE
   if (endpoint.startsWith("/jobs")) {
     if (method === "POST" && endpoint === "/jobs") {
-      const body = JSON.parse((options.body as string) || "{}");
+      let body: any = {};
+      try {
+        body = JSON.parse((options.body as string) || "{}");
+      } catch (e) {}
+
       const newJob = {
         id: `job-${Math.random().toString(36).substring(2, 9)}`,
-        name: body.name || "Custom Computation Task",
+        name: body.name || "Batch Compute Workload",
         job_type: body.job_type || "cpu_intensive",
         priority: body.priority || "NORMAL",
         status: "RUNNING",
         retry_count: 1,
         max_retries: body.max_retries || 3,
-        execution_duration_ms: 410,
+        execution_duration_ms: 380,
         queue_name: `queue.${(body.priority || "normal").toLowerCase()}`,
         worker_id: "worker-node-01",
         created_at: new Date().toISOString(),
         payload: body.payload || {},
-        result: { status: "COMPLETED", output: "Computed successfully in browser demo mode", duration: "410ms" },
+        result: { status: "COMPLETED", output: "Task executed successfully", duration_ms: 380 },
         logs: [
-          { id: "1", timestamp: new Date().toISOString(), level: "INFO", message: `Dispatched to worker-node-01 with priority ${body.priority || "NORMAL"}` },
-          { id: "2", timestamp: new Date().toISOString(), level: "INFO", message: "Executing task handlers..." }
+          { id: "1", timestamp: new Date().toISOString(), level: "INFO", message: `Job enqueued in queue.${(body.priority || "normal").toLowerCase()}` },
+          { id: "2", timestamp: new Date().toISOString(), level: "INFO", message: "Worker worker-node-01 claimed task execution" }
         ],
-        attempts: [{ id: `att-${Date.now()}`, attempt_number: 1, worker_id: "worker-node-01", status: "RUNNING", duration_ms: 410, started_at: new Date().toISOString() }]
+        attempts: [{ id: `att-${Date.now()}`, attempt_number: 1, worker_id: "worker-node-01", status: "RUNNING", duration_ms: 380, started_at: new Date().toISOString() }]
       };
 
       state.jobs.unshift(newJob);
@@ -226,10 +244,10 @@ function handleSimulatedRequest<T>(endpoint: string, options: RequestInit = {}):
         const j = s.jobs.find((x: any) => x.id === newJob.id);
         if (j) {
           j.status = "SUCCEEDED";
-          j.logs.push({ id: "3", timestamp: new Date().toISOString(), level: "INFO", message: "Task completed successfully (410ms)" });
+          j.logs.push({ id: "3", timestamp: new Date().toISOString(), level: "INFO", message: "Task completed successfully (380ms)" });
           saveMockData(s);
         }
-      }, 2500);
+      }, 2000);
 
       return newJob as T;
     }
@@ -305,7 +323,16 @@ function handleSimulatedRequest<T>(endpoint: string, options: RequestInit = {}):
     return state.dlq as T;
   }
 
-  // 8. SYSTEM
+  // 8. AUTH
+  if (endpoint.startsWith("/auth/login") || endpoint.startsWith("/auth/register")) {
+    return {
+      access_token: "demo-jwt-token-flowforge",
+      token_type: "bearer",
+      user: { id: "user-demo-01", email: "demo@flowforge.dev", full_name: "Demo User", role: "ADMIN", is_active: true }
+    } as T;
+  }
+
+  // 9. SYSTEM
   if (endpoint.startsWith("/system/architecture")) {
     return {
       version: "1.0.0",
